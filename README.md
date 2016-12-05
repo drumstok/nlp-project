@@ -2,7 +2,7 @@
 
 ## Papers
 
-* Bengio et al., 2003, A Neural Probabilistic Language Model. Overview of early work. Uses feedforward net. [link](papers/A%20Neural%20Probabilistic%20Language%20Model%20-%20Bengio%20-%202013.pdf)
+* Bengio et al., 2003, A Neural Probabilistic Language Model. Overview of early work. Uses feedforward net. [link](papers/A%20Neural%20Probabilistic%20Language%20Model%20-%20Bengio%20-%202003.pdf)
 * Morin et al., Hierarchical Probabilistic Neural Network Language Model. Introduces hierachical softmax. [link](papers/Hierarchical%20Probabilistic%20Neural%20Network%20Language%20Model%20-%20Morin.pdf)
 * Mikolov et al., 2013. Efficient Estimation of Word Representations in Vector Space. Overview of recurrent models and introducing two log-linear models of word embeddings: continuous bag of words (average embedding of surrounding words used to predict words) and continuous skip gram (word embedding to predict word embeddings of surrounding words). [link](papers/Efficient%20Estimation%20of%20Word%20Representations%20in%20Vector%20Space%20-%20Mikolov%20-%202013.pdf)
 * Mikilov et al. Distributed Representations of Words and Phrases and their Compositionality. Describes hierarchical softmax. Introduces Negative sampling (sample denominator in softmax) and subsampling of frequent words (train more often with rare examples). Learning phrase embeddings (e.g. New York Times). Some words on additional structure of vectors. [link](papers/Distributed%20Representations%20of%20Words%20and%20Phrases%20and%20their%20Compositionality%20-%20Mikolov.pdf)
