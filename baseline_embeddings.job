@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -n 1
 #SBATCH -p gpu
-#SBATCH -t 05:00:00
+#SBATCH -t 08:00:00
 #SBATCH -o logs/baseline_embeddings_%A.output
 #SBATCH -e logs/baseline_embeddings_%A.error
 
