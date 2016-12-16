@@ -179,6 +179,7 @@ def load_embeddings(path):
 
 
 def adopt_random(initial_embeddings, initial_weights, oov_widxs):
+    """Adopt embeddings randomly."""
     r1 = np.random.normal(0, 1.0/math.sqrt(embedding_size),
                           [oov_widxs.size, embedding_size])
     r2 = np.random.normal(0, 1.0/math.sqrt(embedding_size),
@@ -202,7 +203,7 @@ def main(_):
     data = cpl.unknownize(data, vocabulary_size)
     seqs = cpl.to_sequences(data)
 
-    if not os.path.exists(sample_pickle_path):
+    if FLAGS.job == 'sample-oov':
         oov_widxs, (oov_seqs_idxs, iv_seqs_idxs) = cpl.sample_oov_seqs(
             seqs, zipf_idxs, num_oov_words, oov_cutoff_left, vocabulary_size-1)
         oov_seqs_train_idxs, oov_seqs_test_idxs, \
@@ -213,7 +214,11 @@ def main(_):
              iv_seqs_train_idxs, iv_seqs_test_idxs)
         joblib.dump(packet, sample_pickle_path)
         print("Sample created")
+        return
     else:
+        if not os.path.exists(sample_pickle_path):
+            print("No OOV sample found")
+            return
         packet = joblib.load(sample_pickle_path)
         oov_widxs, (oov_seqs_idxs, iv_seqs_idxs), \
             (oov_seqs_train_idxs, oov_seqs_test_idxs,
@@ -240,13 +245,13 @@ def main(_):
         init_op = adopt_random(embeddings_val, weights_val, oov_widxs)
         train(seqs[oov_seqs_train_idxs], seqs[oov_seqs_test_idxs], init_op)
 
-
     elif FLAGS.job == 'load':
         if not FLAGS.saveddir:
             print("No saveddir given")
             return
         embeddings_val, weights_val = load_embeddings(FLAGS.saveddir)
-        print(embeddings_val.shape, embeddings_val.std(), weights_val.shape, weights_val.std())
+        print(embeddings_val.shape, embeddings_val.std(),
+              weights_val.shape, weights_val.std())
 
 
 if __name__ == '__main__':
