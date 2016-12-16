@@ -28,7 +28,7 @@ def unknownize(zipfed, cutoff):
 
 def sample_oov_words(zipf_idxs, num_oov_words, cutoff_left, cutoff_right):
     return np.random.choice(
-        zipf_idxs[cutoff_left:cutoff_right], 
+        np.arange(cutoff_left, cutoff_right),
         replace=False, size=num_oov_words)
 
 def sample_cbow_batch(seqs, context_size):
@@ -36,13 +36,13 @@ def sample_cbow_batch(seqs, context_size):
     ctxidxs = []
     tgtidxs = []
     for i in range(offset, seqs.shape[1]-offset):
-        ctxidxs += [i-j for j in range(offset, 0, -1)] 
+        ctxidxs += [i-j for j in range(offset, 0, -1)]
         ctxidxs += [i+j for j in range(1,offset+1)]
         tgtidxs += [i]
     seqidx = np.array(ctxidxs, np.int32)
     tgtidxs = np.array(tgtidxs, np.int32)
     return seqs[:,ctxidxs].reshape(-1, context_size), seqs[:,tgtidxs].reshape(-1)
-    
+
 def sample_seqs(seqs, num_sampled):
     return np.random.choice(np.arange(seqs.shape[0]), replace=False, size=num_sampled)
 
@@ -57,10 +57,10 @@ def containing_sequences(widxs, seqs, return_negation=False):
     for i in range(1, seqs.shape[1]):
         match = match | np.in1d(seqs[:,i], widxs)
     if return_negation:
-        return np.where(match)[0], np.where(~match)[0] 
+        return np.where(match)[0], np.where(~match)[0]
     else:
         return np.where(match)[0]
- 
+
 ########################################################################
 
 def lookup_word(widx, vocab_path):
@@ -99,7 +99,7 @@ def random_split(a, ratio):
     split = int(a.shape[0] * ratio)
     idxs = np.random.permutation(np.arange(a.shape[0]))
     return a[idxs[:split]], a[idxs[split:]]
-    
+
 def make_train_test_split(oov_seqs, iv_seqs, train_ratio=0.8):
     iv_seqs_train, iv_seqs_test = random_split(iv_seqs, train_ratio)
     oov_seqs_train, oov_seqs_test = random_split(oov_seqs, train_ratio)
@@ -107,15 +107,15 @@ def make_train_test_split(oov_seqs, iv_seqs, train_ratio=0.8):
 
 ########################################################################
 
-def main():    
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("data_path", type=str, help="path to the numpy index")
     parser.add_argument("vocab_path", type=str, help="path to the vocabulary")
 
     args = parser.parse_args()
-    
+
     index = load_data(args.data_path)
-    
+
 
 if __name__ == '__main__':
     main()

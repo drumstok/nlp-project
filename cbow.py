@@ -43,13 +43,15 @@ with graph.as_default():
 
     embeddings = tf.Variable(
             tf.truncated_normal([vocabulary_size, embedding_size],
-                                stddev=1.0/math.sqrt(embedding_size)))
+                                stddev=1.0/math.sqrt(embedding_size)),
+            name="embeddings")
 
     embedded = tf.nn.embedding_lookup(embeddings, inputs_placeholder)
 
     weights = tf.Variable(
             tf.truncated_normal([vocabulary_size, embedding_size],
-                                stddev=1.0/math.sqrt(embedding_size)))
+                                stddev=1.0/math.sqrt(embedding_size)),
+            name="weights")
     biases = tf.zeros([vocabulary_size])
 
     context_vectors = tf.reduce_mean(embedded, 1)
@@ -79,19 +81,25 @@ with graph.as_default():
     init = tf.initialize_all_variables()
 
 
-def train(seqs_train, seqs_test):
+def train(seqs_train, seqs_test, initialize_op=None):
     """Train."""
-    with tf.Session(graph=graph) as sess:
+    with graph.as_default(), tf.Session() as sess:
         sess.run(init)
+
+        if initialize_op:
+            sess.run(initialize_op)
+
         saver = tf.train.Saver()
-        writer = tf.train.SummaryWriter(log_dir+FLAGS.job, graph=graph)
+        writer = tf.train.SummaryWriter(
+            log_dir+FLAGS.logdir+"/"+FLAGS.job, graph=sess.graph)
+        train_batch_creator = BatchCreator(seqs_train)
         print("Initialized")
 
         average_loss = 0
         average_time = 0
         for step in range(num_steps):
             start_time = time.time()
-            batch_inputs, batch_labels = create_batch(seqs_train, batch_size)
+            batch_inputs, batch_labels = train_batch_creator.create(batch_size)
             feed_dict = {
                 inputs_placeholder: batch_inputs,
                 labels_placeholder: batch_labels}
@@ -110,17 +118,18 @@ def train(seqs_train, seqs_test):
                     global_step_val, average_loss, average_time*1000))
                 average_loss = 0
                 average_time = 0
-                saver.save(sess, save_dir+FLAGS.job+"/saved",
+                saver.save(sess, save_dir+FLAGS.logdir+"/"+FLAGS.job+"/saved",
                            global_step=global_step_val)
 
             if step % eval_freq == 0 or step == num_steps-1:
                 for name, seqs_eval in [['train', seqs_train],
                                         ['test', seqs_test]]:
+                    eval_batch_creator = BatchCreator(seqs_eval)
                     start_time = time.time()
                     cum_loss = 0.
                     for _ in range(eval_steps):
-                        eval_inputs, eval_labels = create_batch(
-                            seqs_eval, eval_batch_size)
+                        eval_inputs, eval_labels = eval_batch_creator.create(
+                            eval_batch_size)
                         eval_feed_dict = {
                             inputs_placeholder: eval_inputs,
                             labels_placeholder: eval_labels}
@@ -139,14 +148,50 @@ def train(seqs_train, seqs_test):
                 writer.flush()
 
 
-def create_batch(seqs, batch_size):
-    """Create from a sequence batch_size CBOW contexts and labels."""
-    sample_idxs = cpl.sample_seqs(seqs, np.ceil(
-        batch_size/contexts_per_sequence).astype(np.int32))
+class BatchCreator(object):
+    """Batch creator class. Shuffles once."""
 
-    contexts, targets = cpl.sample_cbow_batch(
-        seqs[sample_idxs], cbow_context_size)
-    return contexts[:batch_size], targets[:batch_size]
+    def __init__(self, seqs):
+        """Initialise."""
+        self.seqs = np.copy(seqs)
+        self.size = seqs.shape[0]
+        np.random.shuffle(self.seqs)
+        self.index = 0
+
+    def create(self, batch_size):
+        """Create batch."""
+        n_seqs = np.ceil(batch_size/contexts_per_sequence).astype(np.int32)
+        if self.index + n_seqs >= self.size-1:
+            np.random.shuffle(self.seqs)
+            self.index = 0
+
+        batch_seqs = self.seqs[self.index:self.index+n_seqs]
+        self.index += n_seqs
+        return cpl.sample_cbow_batch(batch_seqs, cbow_context_size)
+
+
+def load_embeddings(path):
+    """Load embeddings from path to NumPy array."""
+    with graph.as_default(), tf.Session() as sess:
+        saver = tf.train.Saver()
+        saver.restore(sess, tf.train.latest_checkpoint(path))
+        return sess.run([embeddings, weights])
+
+
+def adopt_random(initial_embeddings, initial_weights, oov_widxs):
+    r1 = np.random.normal(0, 1.0/math.sqrt(embedding_size),
+                          [oov_widxs.size, embedding_size])
+    r2 = np.random.normal(0, 1.0/math.sqrt(embedding_size),
+                          [oov_widxs.size, embedding_size])
+    adopted_embeddings = initial_embeddings.copy()
+    adopted_embeddings[oov_widxs, :] = r1
+    adopted_weights = initial_weights.copy()
+    adopted_weights[oov_widxs, :] = r2
+
+    with graph.as_default():
+        op = [embeddings.addign(adopted_embeddings),
+              weights.assign(adopted_weights)]
+        return op
 
 
 def main(_):
@@ -177,7 +222,7 @@ def main(_):
 
     if FLAGS.job == 'initial':
         print("Running initial job")
-        train(seqs[oov_seqs_train_idxs], seqs[oov_seqs_test_idxs])
+        train(seqs[iv_seqs_train_idxs], seqs[iv_seqs_test_idxs])
 
     elif FLAGS.job == 'baseline':
         print("Running baseline job")
@@ -185,11 +230,33 @@ def main(_):
         test_idx = np.concatenate((oov_seqs_test_idxs, iv_seqs_test_idxs))
         train(seqs[train_idx], seqs[test_idx])
 
+    elif FLAGS.job == 'adopt-random':
+        if not FLAGS.saveddir:
+            print("No saveddir given")
+            return
+        print(oov_widxs.max())
+        return
+        embeddings_val, weights_val = load_embeddings(FLAGS.saveddir)
+        init_op = adopt_random(embeddings_val, weights_val, oov_widxs)
+        train(seqs[oov_seqs_train_idxs], seqs[oov_seqs_test_idxs], init_op)
+
+
+    elif FLAGS.job == 'load':
+        if not FLAGS.saveddir:
+            print("No saveddir given")
+            return
+        embeddings_val, weights_val = load_embeddings(FLAGS.saveddir)
+        print(embeddings_val.shape, embeddings_val.std(), weights_val.shape, weights_val.std())
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('job', type = str,
+    parser.add_argument('job', type=str,
                         help='Either of [initial, baseline]')
+    parser.add_argument('--logdir', type=str, default='default',
+                        help='Relative log and checkpoint path')
+    parser.add_argument('--saveddir', type=str,
+                        help='Path to found embeddings')
     FLAGS, unparsed = parser.parse_known_args()
 
     tf.app.run()
