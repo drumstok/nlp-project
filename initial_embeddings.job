@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH -n 1
+#SBATCH -p gpu
+#SBATCH -t 05:00:00
+#SBATCH -o logs/initial_embeddings_%A.output
+#SBATCH -e logs/initial_embeddings_%A.error
+
+module load python/2.7.11
+module load cuda/7.5.18
+module load cudnn/7.5-v5
+
+cd /home/gdemo082/nlp
+
+python cbow.py initial

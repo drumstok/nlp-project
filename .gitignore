@@ -1,3 +1,6 @@
 raw_data
 .ipynb_checkpoints
 parsed
+saved
+logs
+**.pyc
