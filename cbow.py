@@ -186,20 +186,16 @@ def load_embeddings(path):
 def adapt_random(initial_embeddings, initial_weights, oov_widxs):
     """Adapt embeddings randomly."""
     # For embeddings, random init with equals norm as rest
-    oov_embeddings = np.random.normal(0, 1, [oov_widxs.size, embedding_size])
     embeddings_avg_norm = np.mean(np.linalg.norm(initial_embeddings, axis=1))
-    oov_embeddings = oov_embeddings \
-        / np.linalg.norm(oov_embeddings, axis=1)[:, np.newaxis] \
-        * embeddings_avg_norm
+    oov_embeddings = np.random.normal(0, embeddings_avg_norm,
+                                      [oov_widxs.size, embedding_size])
     adapted_embeddings = initial_embeddings.copy()
     adapted_embeddings[oov_widxs, :] = oov_embeddings
 
     # For weights
-    oov_weights = np.random.normal(0, 1, [oov_widxs.size, embedding_size])
     weights_avg_norm = np.mean(np.linalg.norm(initial_weights, axis=1))
-    oov_weights = oov_weights \
-        / np.linalg.norm(oov_weights, axis=1)[:, np.newaxis] \
-        * weights_avg_norm
+    oov_weights = np.random.normal(0, weights_avg_norm,
+                                   [oov_widxs.size, embedding_size])
     adapted_weights = initial_weights.copy()
     adapted_weights[oov_widxs, :] = oov_weights
 
@@ -219,11 +215,10 @@ def adapt_discr(initial_embeddings, initial_weights, oov_widxs, sim_widxs):
 
 def adapt_prob(initial_embeddings, initial_weights,
                oov_widxs, oov_seqs_train):
-    """Adapt model probabilistically."""
-    # First random init for oov co-occurrence.
-    oov_random_embeddings, oov_random_weights = adapt_random(
-        initial_embeddings, initial_weights, oov_widxs)
+    """Adapt model probabilistically.
 
+    Input matrices should have random OOV vectors.
+    """
     # Find relevant contexts
     contexts, labels = BatchCreator(oov_seqs_train).create(
         oov_seqs_train.shape[0]*contexts_per_sequence)
@@ -239,11 +234,9 @@ def adapt_prob(initial_embeddings, initial_weights,
         print("Batch {} / {}".format(step+1, n_steps))
         batch_contexts = contexts[step*batch_size:(step+1)*batch_size]
         batch_labels = labels[step*batch_size:(step+1)*batch_size]
-        embedded = oov_random_embeddings[batch_contexts, :]
-        # embedded = np.einsum('nmw,wi->nmi',
-        #                      batch_contexts, oov_random_embeddings)
+        embedded = initial_embeddings[batch_contexts, :]
         context_vectors = np.mean(embedded, axis=1)
-        logits = np.matmul(context_vectors, oov_random_weights.T)
+        logits = np.matmul(context_vectors, initial_weights.T)
         exponents = np.exp(logits)
         # Don't classify OOV as OOV
         exponents[:, oov_widxs] = 0
@@ -256,8 +249,8 @@ def adapt_prob(initial_embeddings, initial_weights,
     # n_oov x vocab_size matrix indicating final classifications
     classifications = classifications_sum[oov_widxs, :] / \
         label_count[oov_widxs, np.newaxis]
-    oov_embeddings = np.matmul(classifications, oov_random_embeddings)
-    oov_weights = np.matmul(classifications, oov_random_weights)
+    oov_embeddings = np.matmul(classifications, initial_embeddings)
+    oov_weights = np.matmul(classifications, initial_weights)
     adapted_embeddings = initial_embeddings.copy()
     adapted_embeddings[oov_widxs, :] = oov_embeddings
     adapted_weights = initial_weights.copy()
@@ -306,7 +299,7 @@ def main(_):
         test_idx = np.concatenate((oov_seqs_test_idxs, iv_seqs_test_idxs))
         train(seqs[train_idx], seqs[test_idx])
 
-    elif FLAGS.job == 'adapt-random-init':
+    elif FLAGS.job == 'adapt-init-random':
         initial_embeddings, initial_weights = load_embeddings(
             first_results_path+"/saved/initial")
         adapted_embeddings, adapted_weights = \
@@ -314,15 +307,20 @@ def main(_):
         joblib.dump((adapted_embeddings, adapted_weights),
                     init_embeddings_pickle_path+"random")
         print("Random init saved")
-    elif FLAGS.job == 'adapt-prob-init':
-        initial_embeddings, initial_weights = load_embeddings(
-            first_results_path+"/saved/initial")
-        adapted_embeddings, adapted_weights = \
-            adapt_prob(initial_embeddings, initial_weights,
-                       oov_widxs, seqs[oov_seqs_train_idxs])
+
+    elif FLAGS.job == 'adapt-init-prob':
+        if not os.path.exists(init_embeddings_pickle_path+"random"):
+            print("Ranom init not found")
+            return
+        random_embeddings, random_weights = joblib.load(
+            init_embeddings_pickle_path+"random")
+        adapted_embeddings, adapted_weights = adapt_prob(
+            random_embeddings, random_weights,
+            oov_widxs, seqs[oov_seqs_train_idxs])
         joblib.dump((adapted_embeddings, adapted_weights),
                     init_embeddings_pickle_path+"prob")
         print("Probabilistic init saved")
+
     elif FLAGS.job == 'adapt-random-train':
         adapted_embeddings, adapted_weights = joblib.load(
             init_embeddings_pickle_path+"random")
