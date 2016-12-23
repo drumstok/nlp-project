@@ -244,11 +244,6 @@ def adapt_prob(initial_embeddings, initial_weights,
     classifications = classifications_sum[oov_widxs, :] / \
         label_count[oov_widxs, np.newaxis]
 
-    # Temporary dumping
-    joblib.dump(classifications, 'temp/classifications')
-    joblib.dump(classifications_sum, 'temp/classifications_sum')
-    joblib.dump(label_count, 'temp/label_count')
-
     oov_embeddings = np.matmul(classifications, initial_embeddings)
     oov_weights = np.matmul(classifications, initial_weights)
 
@@ -387,6 +382,14 @@ def main(_):
             first_results_path+"/saved/baseline/saved-233501")
         joblib.dump((embeddings, weights),
                     init_embeddings_pickle_path+"baseline")
+        embeddings, weights = load_embeddings(
+            "third_training_results/saved/adapt-prob/saved-6501")
+        joblib.dump((embeddings, weights),
+                    init_embeddings_pickle_path+"trained-prob")
+        embeddings, weights = load_embeddings(
+            "third_training_results/saved/adapt-random/saved-6501")
+        joblib.dump((embeddings, weights),
+                    init_embeddings_pickle_path+"trained-random")
         print("Embeddings extracted from TF into NPY.")
 
     else:
