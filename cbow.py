@@ -1,4 +1,5 @@
 """OOV CBOW model."""
+from __future__ import print_function
 import tensorflow as tf
 import numpy as np
 import argparse
@@ -25,10 +26,11 @@ data_path = 'parsed/indices.npy'
 sample_pickle_path = 'sample_pickle/sample_pickle.pkl'
 init_embeddings_pickle_path = 'init_embeddings/'
 first_results_path = 'first_training_results/'
+eval_pickle_path = 'evaluations/'
 # Number of steps after which train loss is printed and vars saved
 print_freq = 250
 # Number of steps after which full loss is evaluated and summaries saved
-eval_freq = 1000
+eval_freq = 500
 # Number of samples used for evaluation
 eval_steps = 20
 eval_batch_size = 30000
@@ -58,24 +60,12 @@ with graph.as_default():
 
     context_vectors = tf.reduce_mean(embedded, 1)
 
-    # sampled_losses = tf.nn.sampled_softmax_loss(
-    #     weights, biases, context_vectors,
-    #     tf.reshape(labels_placeholder,
-    #                [tf.size(labels_placeholder), 1]),
-    #     num_softmax_sampled,
-    #     vocabulary_size)
-    # loss = tf.reduce_mean(sampled_losses)
-
     logits = tf.matmul(context_vectors, tf.transpose(weights))
-    full_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-        logits, labels_placeholder))
+    losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        logits, labels_placeholder)
+    loss = tf.reduce_mean(losses)
 
-    loss = full_loss
-
-    # train_loss_summary = tf.scalar_summary("train-loss", loss)
-    # train_full_loss_summary = tf.scalar_summary("train-full-loss", full_loss)
-    # test_loss_summary = tf.scalar_summary("test-loss", loss)
-    # test_full_loss_summary = tf.scalar_summary("test-full-loss", full_loss)
+    probabilities = tf.nn.softmax(logits)
 
     optimizer = tf.train.AdamOptimizer(1e-4)
     train_op = optimizer.minimize(loss, global_step=global_step)
@@ -84,19 +74,19 @@ with graph.as_default():
 
 
 def train(seqs_train, seqs_test,
+          log_dir, save_dir,
           initial_embeddings=None, initial_weights=None):
     """Train."""
     with graph.as_default(), tf.Session() as sess:
         sess.run(init)
 
-        if initial_embeddings:
+        if initial_embeddings is not None:
             sess.run(embeddings.assign(initial_embeddings))
-        if initial_weights:
+        if initial_weights is not None:
             sess.run(weights.assign(initial_weights))
 
-        saver = tf.train.Saver()
-        writer = tf.train.SummaryWriter(
-            log_dir+FLAGS.logdir+"/"+FLAGS.job, graph=sess.graph)
+        saver = tf.train.Saver(keep_checkpoint_every_n_hours=0.2)
+        writer = tf.train.SummaryWriter(log_dir, graph=sess.graph)
         train_batch_creator = BatchCreator(seqs_train)
         print("Initialized")
 
@@ -123,8 +113,7 @@ def train(seqs_train, seqs_test,
                     global_step_val, average_loss, average_time*1000))
                 average_loss = 0
                 average_time = 0
-                saver.save(sess, save_dir+FLAGS.logdir+"/"+FLAGS.job+"/saved",
-                           global_step=global_step_val)
+                saver.save(sess, save_dir, global_step=global_step_val)
 
             if step % eval_freq == 0 or step == num_steps-1:
                 for name, seqs_eval in [['train', seqs_train],
@@ -139,7 +128,7 @@ def train(seqs_train, seqs_test,
                             inputs_placeholder: eval_inputs,
                             labels_placeholder: eval_labels}
                         cum_loss += sess.run(
-                            full_loss, feed_dict=eval_feed_dict)
+                            loss, feed_dict=eval_feed_dict)
                     eval_loss = cum_loss / eval_steps
                     duration = time.time() - start_time
                     summary = tf.Summary(value=[
@@ -179,27 +168,25 @@ def load_embeddings(path):
     """Load embeddings from path to NumPy array."""
     with graph.as_default(), tf.Session() as sess:
         saver = tf.train.Saver()
-        saver.restore(sess, tf.train.latest_checkpoint(path))
+        saver.restore(sess, path)
         return sess.run([embeddings, weights])
 
 
 def adapt_random(initial_embeddings, initial_weights, oov_widxs):
     """Adapt embeddings randomly."""
     # For embeddings, random init with equals norm as rest
-    oov_embeddings = np.random.normal(0, 1, [oov_widxs.size, embedding_size])
     embeddings_avg_norm = np.mean(np.linalg.norm(initial_embeddings, axis=1))
-    oov_embeddings = oov_embeddings \
-        / np.linalg.norm(oov_embeddings, axis=1)[:, np.newaxis] \
-        * embeddings_avg_norm
+    embeddings_avg_norm = initial_embeddings.std()
+    oov_embeddings = np.random.normal(0, embeddings_avg_norm,
+                                      [oov_widxs.size, embedding_size])
     adapted_embeddings = initial_embeddings.copy()
     adapted_embeddings[oov_widxs, :] = oov_embeddings
 
     # For weights
-    oov_weights = np.random.normal(0, 1, [oov_widxs.size, embedding_size])
     weights_avg_norm = np.mean(np.linalg.norm(initial_weights, axis=1))
-    oov_weights = oov_weights \
-        / np.linalg.norm(oov_weights, axis=1)[:, np.newaxis] \
-        * weights_avg_norm
+    weights_avg_norm = initial_weights.std()
+    oov_weights = np.random.normal(0, weights_avg_norm,
+                                   [oov_widxs.size, embedding_size])
     adapted_weights = initial_weights.copy()
     adapted_weights[oov_widxs, :] = oov_weights
 
@@ -219,11 +206,10 @@ def adapt_discr(initial_embeddings, initial_weights, oov_widxs, sim_widxs):
 
 def adapt_prob(initial_embeddings, initial_weights,
                oov_widxs, oov_seqs_train):
-    """Adapt model probabilistically."""
-    # First random init for oov co-occurrence.
-    oov_random_embeddings, oov_random_weights = adapt_random(
-        initial_embeddings, initial_weights, oov_widxs)
+    """Adapt model probabilistically.
 
+    Input matrices should have random OOV vectors.
+    """
     # Find relevant contexts
     contexts, labels = BatchCreator(oov_seqs_train).create(
         oov_seqs_train.shape[0]*contexts_per_sequence)
@@ -233,37 +219,71 @@ def adapt_prob(initial_embeddings, initial_weights,
     classifications_sum = np.zeros([vocabulary_size, vocabulary_size])
     label_count = np.zeros([vocabulary_size])
 
+    # Don't classify OOV as OOV
+    weights_oov_zero = initial_weights.copy()
+    weights_oov_zero[oov_widxs, :] = 0
+
     # Compute in batches, then average
     n_steps = np.ceil(labels.size/batch_size).astype(np.int32)
     for step in range(n_steps):
         print("Batch {} / {}".format(step+1, n_steps))
         batch_contexts = contexts[step*batch_size:(step+1)*batch_size]
         batch_labels = labels[step*batch_size:(step+1)*batch_size]
-        embedded = oov_random_embeddings[batch_contexts, :]
-        # embedded = np.einsum('nmw,wi->nmi',
-        #                      batch_contexts, oov_random_embeddings)
-        context_vectors = np.mean(embedded, axis=1)
-        logits = np.matmul(context_vectors, oov_random_weights.T)
-        exponents = np.exp(logits)
-        # Don't classify OOV as OOV
-        exponents[:, oov_widxs] = 0
-        normalizer = np.sum(exponents, axis=1)[:, np.newaxis]
-        probabilities = exponents / normalizer
-        for prob, label in zip(probabilities, batch_labels):
+        with graph.as_default(), tf.Session() as sess:
+            probs = sess.run(probabilities, feed_dict={
+                inputs_placeholder: batch_contexts,
+                embeddings: initial_embeddings,
+                weights: weights_oov_zero
+            })
+        counts = np.bincount(batch_labels)
+        label_count[np.arange(counts.size)] += counts
+        for prob, label in zip(probs, batch_labels):
             classifications_sum[label] += prob
-            label_count[label] += 1
 
     # n_oov x vocab_size matrix indicating final classifications
     classifications = classifications_sum[oov_widxs, :] / \
         label_count[oov_widxs, np.newaxis]
-    oov_embeddings = np.matmul(classifications, oov_random_embeddings)
-    oov_weights = np.matmul(classifications, oov_random_weights)
+
+    # Temporary dumping
+    joblib.dump(classifications, 'temp/classifications')
+    joblib.dump(classifications_sum, 'temp/classifications_sum')
+    joblib.dump(label_count, 'temp/label_count')
+
+    oov_embeddings = np.matmul(classifications, initial_embeddings)
+    oov_weights = np.matmul(classifications, initial_weights)
+
+    # Remove NaN for numbers that have not been target anywhere
+    mask = ~np.isnan(classifications).any(axis=1)
+
     adapted_embeddings = initial_embeddings.copy()
-    adapted_embeddings[oov_widxs, :] = oov_embeddings
+    adapted_embeddings[oov_widxs[mask], :] = oov_embeddings[mask, :]
     adapted_weights = initial_weights.copy()
-    adapted_weights[oov_widxs, :] = oov_weights
+    adapted_weights[oov_widxs[mask], :] = oov_weights[mask, :]
 
     return adapted_embeddings, adapted_weights
+
+
+def loss_ov_iv(embeddings_val, weights_val, oov_widxs, seqs):
+    """Evaluate loss for OOV and IV words separately."""
+    batch_creator = BatchCreator(seqs)
+
+    iv_losses = []
+    oov_losses = []
+    with graph.as_default(), tf.Session() as sess:
+        for step in range(eval_steps):
+            print("Batch {} / {}".format(step+1, eval_steps))
+            batch_contexts, batch_labels = batch_creator.create(
+                eval_batch_size)
+            losses_val = sess.run(losses, feed_dict={
+                inputs_placeholder: batch_contexts,
+                labels_placeholder: batch_labels,
+                embeddings: embeddings_val,
+                weights: weights_val
+            })
+            mask = np.in1d(batch_labels, oov_widxs)
+            iv_losses += losses_val[~mask].tolist()
+            oov_losses += losses_val[mask].tolist()
+    return np.array(iv_losses), np.array(oov_losses)
 
 
 def main(_):
@@ -298,41 +318,79 @@ def main(_):
 
     if FLAGS.job == 'initial':
         print("Running initial job")
-        train(seqs[iv_seqs_train_idxs], seqs[iv_seqs_test_idxs])
+        train(seqs[iv_seqs_train_idxs], seqs[iv_seqs_test_idxs],
+              log_dir+'initial', save_dir+'initial')
 
     elif FLAGS.job == 'baseline':
         print("Running baseline job")
         train_idx = np.concatenate((oov_seqs_train_idxs, iv_seqs_train_idxs))
         test_idx = np.concatenate((oov_seqs_test_idxs, iv_seqs_test_idxs))
-        train(seqs[train_idx], seqs[test_idx])
+        train(seqs[train_idx], seqs[test_idx],
+              log_dir+'baseline', save_dir+'baseline')
 
-    elif FLAGS.job == 'adapt-random-init':
-        initial_embeddings, initial_weights = load_embeddings(
-            first_results_path+"/saved/initial")
+    elif FLAGS.job == 'adapt-init-random':
+        initial_embeddings, initial_weights = joblib.load(
+            init_embeddings_pickle_path+"initial")
         adapted_embeddings, adapted_weights = \
             adapt_random(initial_embeddings, initial_weights, oov_widxs)
         joblib.dump((adapted_embeddings, adapted_weights),
                     init_embeddings_pickle_path+"random")
         print("Random init saved")
-    elif FLAGS.job == 'adapt-prob-init':
-        initial_embeddings, initial_weights = load_embeddings(
-            first_results_path+"/saved/initial")
-        adapted_embeddings, adapted_weights = \
-            adapt_prob(initial_embeddings, initial_weights,
-                       oov_widxs, seqs[oov_seqs_train_idxs])
+
+    elif FLAGS.job == 'adapt-init-prob':
+        if not os.path.exists(init_embeddings_pickle_path+"random"):
+            print("Ranom init not found")
+            return
+        random_embeddings, random_weights = joblib.load(
+            init_embeddings_pickle_path+"random")
+        adapted_embeddings, adapted_weights = adapt_prob(
+            random_embeddings, random_weights,
+            oov_widxs, seqs[oov_seqs_train_idxs])
         joblib.dump((adapted_embeddings, adapted_weights),
                     init_embeddings_pickle_path+"prob")
         print("Probabilistic init saved")
-    elif FLAGS.job == 'adapt-random-train':
+
+    elif FLAGS.job == 'adapt-train-random':
         adapted_embeddings, adapted_weights = joblib.load(
             init_embeddings_pickle_path+"random")
         train(seqs[oov_seqs_train_idxs], seqs[oov_seqs_test_idxs],
+              log_dir+'adapt-random', save_dir+'adapt-random/saved',
               adapted_embeddings, adapted_weights)
 
+    elif FLAGS.job == 'adapt-train-prob':
+        adapted_embeddings, adapted_weights = joblib.load(
+            init_embeddings_pickle_path+"prob")
+        train(seqs[oov_seqs_train_idxs], seqs[oov_seqs_test_idxs],
+              log_dir+'adapt-prob', save_dir+'adapt-prob/saved',
+              adapted_embeddings, adapted_weights)
+
+    elif FLAGS.job == 'eval':
+        if not FLAGS.embedding:
+            print("Set embedding to be eval'd with --embedding")
+            return
+        embeddings, weights = joblib.load(
+            init_embeddings_pickle_path+FLAGS.embedding)
+        iv_losses, oov_losses = loss_ov_iv(
+            embeddings, weights, oov_widxs, seqs[oov_seqs_test_idxs])
+        joblib.dump((iv_losses, oov_losses), eval_pickle_path+FLAGS.embedding)
+        print("IV losses: mean {:.4f} std {:.4f}".format(
+            np.mean(iv_losses), np.std(iv_losses)))
+        print("OOV losses: mean {:.4f} std {:.4f}".format(
+            np.mean(oov_losses), np.std(oov_losses)))
+
     elif FLAGS.job == 'load':
-        embeddings_val, weights_val = load_embeddings(FLAGS.saveddir)
-        print(embeddings_val.shape, embeddings_val.std(),
-              weights_val.shape, weights_val.std())
+        embeddings, weights = load_embeddings(
+            first_results_path+"/saved/initial/saved-236001")
+        joblib.dump((embeddings, weights),
+                    init_embeddings_pickle_path+"initial")
+        embeddings, weights = load_embeddings(
+            first_results_path+"/saved/baseline/saved-233501")
+        joblib.dump((embeddings, weights),
+                    init_embeddings_pickle_path+"baseline")
+        print("Embeddings extracted from TF into NPY.")
+
+    else:
+        print("Job not recognised.")
 
 
 if __name__ == '__main__':
@@ -342,10 +400,8 @@ if __name__ == '__main__':
                              ' adapt-descr, adapt-prob]')
     parser.add_argument('--logdir', type=str, default='default',
                         help='Relative log and checkpoint path')
-    parser.add_argument('--saveddir', type=str,
-                        help='Path to found embeddings')
-    parser.add_argument('--save_adapted', type=str,
-                        help='Path where to store adapted embeddings')
+    parser.add_argument('--embedding', type=str,
+                        help='Embedding to be evaluated')
     FLAGS, unparsed = parser.parse_known_args()
 
     tf.app.run()
