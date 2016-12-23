@@ -30,7 +30,7 @@ eval_pickle_path = 'evaluations/'
 # Number of steps after which train loss is printed and vars saved
 print_freq = 250
 # Number of steps after which full loss is evaluated and summaries saved
-eval_freq = 1000
+eval_freq = 500
 # Number of samples used for evaluation
 eval_steps = 20
 eval_batch_size = 30000
@@ -74,19 +74,19 @@ with graph.as_default():
 
 
 def train(seqs_train, seqs_test,
+          log_dir, save_dir,
           initial_embeddings=None, initial_weights=None):
     """Train."""
     with graph.as_default(), tf.Session() as sess:
         sess.run(init)
 
-        if initial_embeddings:
+        if initial_embeddings is not None:
             sess.run(embeddings.assign(initial_embeddings))
-        if initial_weights:
+        if initial_weights is not None:
             sess.run(weights.assign(initial_weights))
 
-        saver = tf.train.Saver()
-        writer = tf.train.SummaryWriter(
-            log_dir+FLAGS.logdir+"/"+FLAGS.job, graph=sess.graph)
+        saver = tf.train.Saver(keep_checkpoint_every_n_hours=0.2)
+        writer = tf.train.SummaryWriter(log_dir, graph=sess.graph)
         train_batch_creator = BatchCreator(seqs_train)
         print("Initialized")
 
@@ -113,8 +113,7 @@ def train(seqs_train, seqs_test,
                     global_step_val, average_loss, average_time*1000))
                 average_loss = 0
                 average_time = 0
-                saver.save(sess, save_dir+FLAGS.logdir+"/"+FLAGS.job+"/saved",
-                           global_step=global_step_val)
+                saver.save(sess, save_dir, global_step=global_step_val)
 
             if step % eval_freq == 0 or step == num_steps-1:
                 for name, seqs_eval in [['train', seqs_train],
@@ -169,7 +168,7 @@ def load_embeddings(path):
     """Load embeddings from path to NumPy array."""
     with graph.as_default(), tf.Session() as sess:
         saver = tf.train.Saver()
-        saver.restore(sess, tf.train.latest_checkpoint(path))
+        saver.restore(sess, path)
         return sess.run([embeddings, weights])
 
 
@@ -319,13 +318,15 @@ def main(_):
 
     if FLAGS.job == 'initial':
         print("Running initial job")
-        train(seqs[iv_seqs_train_idxs], seqs[iv_seqs_test_idxs])
+        train(seqs[iv_seqs_train_idxs], seqs[iv_seqs_test_idxs],
+              log_dir+'initial', save_dir+'initial')
 
     elif FLAGS.job == 'baseline':
         print("Running baseline job")
         train_idx = np.concatenate((oov_seqs_train_idxs, iv_seqs_train_idxs))
         test_idx = np.concatenate((oov_seqs_test_idxs, iv_seqs_test_idxs))
-        train(seqs[train_idx], seqs[test_idx])
+        train(seqs[train_idx], seqs[test_idx],
+              log_dir+'baseline', save_dir+'baseline')
 
     elif FLAGS.job == 'adapt-init-random':
         initial_embeddings, initial_weights = joblib.load(
@@ -349,11 +350,19 @@ def main(_):
                     init_embeddings_pickle_path+"prob")
         print("Probabilistic init saved")
 
-    # elif FLAGS.job == 'adapt-random-train':
-    #     adapted_embeddings, adapted_weights = joblib.load(
-    #         init_embeddings_pickle_path+"random")
-    #     train(seqs[oov_seqs_train_idxs], seqs[oov_seqs_test_idxs],
-    #           adapted_embeddings, adapted_weights)
+    elif FLAGS.job == 'adapt-train-random':
+        adapted_embeddings, adapted_weights = joblib.load(
+            init_embeddings_pickle_path+"random")
+        train(seqs[oov_seqs_train_idxs], seqs[oov_seqs_test_idxs],
+              log_dir+'adapt-random', save_dir+'adapt-random/saved',
+              adapted_embeddings, adapted_weights)
+
+    elif FLAGS.job == 'adapt-train-prob':
+        adapted_embeddings, adapted_weights = joblib.load(
+            init_embeddings_pickle_path+"prob")
+        train(seqs[oov_seqs_train_idxs], seqs[oov_seqs_test_idxs],
+              log_dir+'adapt-prob', save_dir+'adapt-prob/saved',
+              adapted_embeddings, adapted_weights)
 
     elif FLAGS.job == 'eval':
         if not FLAGS.embedding:
@@ -371,11 +380,11 @@ def main(_):
 
     elif FLAGS.job == 'load':
         embeddings, weights = load_embeddings(
-            first_results_path+"/saved/initial")
+            first_results_path+"/saved/initial/saved-236001")
         joblib.dump((embeddings, weights),
                     init_embeddings_pickle_path+"initial")
         embeddings, weights = load_embeddings(
-            first_results_path+"/saved/baseline")
+            first_results_path+"/saved/baseline/saved-233501")
         joblib.dump((embeddings, weights),
                     init_embeddings_pickle_path+"baseline")
         print("Embeddings extracted from TF into NPY.")
