@@ -7,6 +7,7 @@ import math
 import corpuslib as cpl
 import time
 from sklearn.externals import joblib
+from scipy.stats import ttest_ind
 import os
 
 vocabulary_size = 30000
@@ -244,11 +245,6 @@ def adapt_prob(initial_embeddings, initial_weights,
     classifications = classifications_sum[oov_widxs, :] / \
         label_count[oov_widxs, np.newaxis]
 
-    # Temporary dumping
-    joblib.dump(classifications, 'temp/classifications')
-    joblib.dump(classifications_sum, 'temp/classifications_sum')
-    joblib.dump(label_count, 'temp/label_count')
-
     oov_embeddings = np.matmul(classifications, initial_embeddings)
     oov_weights = np.matmul(classifications, initial_weights)
 
@@ -271,7 +267,6 @@ def loss_ov_iv(embeddings_val, weights_val, oov_widxs, seqs):
     oov_losses = []
     with graph.as_default(), tf.Session() as sess:
         for step in range(eval_steps):
-            print("Batch {} / {}".format(step+1, eval_steps))
             batch_contexts, batch_labels = batch_creator.create(
                 eval_batch_size)
             losses_val = sess.run(losses, feed_dict={
@@ -365,18 +360,32 @@ def main(_):
               adapted_embeddings, adapted_weights)
 
     elif FLAGS.job == 'eval':
-        if not FLAGS.embedding:
-            print("Set embedding to be eval'd with --embedding")
-            return
-        embeddings, weights = joblib.load(
-            init_embeddings_pickle_path+FLAGS.embedding)
-        iv_losses, oov_losses = loss_ov_iv(
-            embeddings, weights, oov_widxs, seqs[oov_seqs_test_idxs])
-        joblib.dump((iv_losses, oov_losses), eval_pickle_path+FLAGS.embedding)
-        print("IV losses: mean {:.4f} std {:.4f}".format(
-            np.mean(iv_losses), np.std(iv_losses)))
-        print("OOV losses: mean {:.4f} std {:.4f}".format(
-            np.mean(oov_losses), np.std(oov_losses)))
+        embedding_names = ['baseline', 'initial', 'prob', 'random',
+                           'trained-prob', 'trained-random']
+        for name in embedding_names:
+            embeddings, weights = joblib.load(
+                init_embeddings_pickle_path+name)
+            iv_losses, oov_losses = loss_ov_iv(
+                embeddings, weights, oov_widxs, seqs[oov_seqs_test_idxs])
+            joblib.dump((iv_losses, oov_losses), eval_pickle_path+name)
+            print("For {}".format(name))
+            print("IV losses: mean {:.4f} std {:.4f}".format(
+                np.mean(iv_losses), np.std(iv_losses)))
+            print("OOV losses: mean {:.4f} std {:.4f}".format(
+                np.mean(oov_losses), np.std(oov_losses)))
+
+    elif FLAGS.job == 'stats':
+        comparisons = [['random', 'prob'], ['trained-random', 'trained-prob']]
+        for x, y in comparisons:
+            x_iv_losses, x_oov_losses = joblib.load(eval_pickle_path+x)
+            y_iv_losses, y_oov_losses = joblib.load(eval_pickle_path+y)
+            iv_stats, iv_p = ttest_ind(x_iv_losses, y_iv_losses)
+            oov_stats, oov_p = ttest_ind(x_oov_losses, y_oov_losses)
+            print("Comparing {} with {}".format(x, y))
+            print("IV t-statistic={} p-value={}".format(
+                iv_stats, iv_p))
+            print("OOV t-statistic={} p-value={}".format(
+                oov_stats, oov_p))
 
     elif FLAGS.job == 'load':
         embeddings, weights = load_embeddings(
@@ -387,6 +396,14 @@ def main(_):
             first_results_path+"/saved/baseline/saved-233501")
         joblib.dump((embeddings, weights),
                     init_embeddings_pickle_path+"baseline")
+        embeddings, weights = load_embeddings(
+            "third_training_results/saved/adapt-prob/saved-6501")
+        joblib.dump((embeddings, weights),
+                    init_embeddings_pickle_path+"trained-prob")
+        embeddings, weights = load_embeddings(
+            "third_training_results/saved/adapt-random/saved-6501")
+        joblib.dump((embeddings, weights),
+                    init_embeddings_pickle_path+"trained-random")
         print("Embeddings extracted from TF into NPY.")
 
     else:

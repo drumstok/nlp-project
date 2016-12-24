@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH -n 1
+#SBATCH -p gpu
+#SBATCH -t 01:00:00
+#SBATCH -o logs/rnn_prob_%A.output
+#SBATCH -e logs/rnn_prob_%A.error
+
+module load python/2.7.11
+module load cuda/7.5.18
+module load cudnn/7.5-v5
+
+cd $HOME/nlp
+
+python rnn_lstm.py trained-prob
