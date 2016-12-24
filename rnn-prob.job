@@ -11,4 +11,4 @@ module load cudnn/7.5-v5
 
 cd $HOME/nlp
 
-python rnn_lstm.py prob
+python rnn_lstm.py trained-prob

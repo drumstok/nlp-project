@@ -24,7 +24,7 @@ embedding_size = 300
 vocabulary_size = 30000
 state_size = 1024
 batch_size = 25
-train_steps = 100000
+train_steps = 20000
 eval_steps = 10
 eval_batch_size = 2000
 learning_rate = 2e-5
@@ -247,11 +247,8 @@ def main(_):
     if job == 'nopretrain':
         init_embedding = np.random.normal(
             size=[vocabulary_size, embedding_size], scale=1.0/math.sqrt(embedding_size)).astype(np.float32)
-    elif job == 'baseline':
-        init_embedding, _ = joblib.load("init_embeddings/baseline")
-        init_embedding = init_embedding.astype(np.float32)
     else:
-        init_embedding, _ = joblib.load("init_embeddings/trained-"+job)
+        init_embedding, _ = joblib.load("init_embeddings/"+job)
         init_embedding = init_embedding.astype(np.float32)
     train_network(init_embedding, seqs[oov_seqs_train_idxs], seqs[oov_seqs_test_idxs], log_dir)
 

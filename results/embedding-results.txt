@@ -1,0 +1,31 @@
+For baseline
+IV losses: mean 4.8470 std 3.2137
+OOV losses: mean 7.8283 std 2.8923
+
+For initial
+IV losses: mean 5.0375 std 3.0946
+OOV losses: mean 20.1186 std 1.5508
+
+For prob
+IV losses: mean 5.4883 std 3.2541
+OOV losses: mean 7.9324 std 0.5302
+
+For random
+IV losses: mean 5.4147 std 3.1236
+OOV losses: mean 9.2876 std 1.5970
+
+For trained-prob
+IV losses: mean 4.9192 std 3.2484
+OOV losses: mean 6.7475 std 2.1741
+
+For trained-random
+IV losses: mean 4.9109 std 3.2420
+OOV losses: mean 7.0743 std 2.5742
+
+Comparing random with prob
+IV t-statistic=-12.2675540221 p-value=1.35966469419e-34
+OOV t-statistic=149.889018693 p-value=0.0
+
+Comparing trained-random with trained-prob
+IV t-statistic=-1.36582853475 p-value=0.171993059518
+OOV t-statistic=18.039255973 p-value=1.40646251417e-72
