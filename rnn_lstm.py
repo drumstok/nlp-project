@@ -115,7 +115,7 @@ def build_tf_graph(init_embedding, vocab_size, batch_size, num_steps, state_size
     
     # appply the rnn cell to the sequence of input vectors
     rnn_in = x_as_list
-    rnn_cell = tf.nn.rnn_cell.BasicRNNCell(num_units=state_size)
+    rnn_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=state_size)
     rnn_out, training_state = tf.nn.rnn(rnn_cell, rnn_in, initial_state=init_state)
     
     # project the output sequence via a softmax layer back to vocabulary space
